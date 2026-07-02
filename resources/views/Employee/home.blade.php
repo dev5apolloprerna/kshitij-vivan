@@ -44,6 +44,7 @@
                                                     <input type="hidden" name="start_latitude" id="latitude">
                                                     <input type="hidden" name="start_longitude" id="longitude">
                                                     <input type="hidden" name="start_address" id="address">
+
                                                 <div class="d-flex align-items-end justify-content-between mt-4">
                                                     <div style="width: 170px">
                                                             <h4 class="fs-22 fw-bold ff-secondary text-white mb-4">
@@ -75,6 +76,7 @@
                                                     <input type="hidden" name="end_latitude" id="endlatitude">
                                                     <input type="hidden" name="end_longitude" id="endlongitude">
                                                     <input type="hidden" name="end_address" id="endaddress">
+
                                                 <div class="d-flex align-items-end justify-content-between mt-4">
                                                     <div style="width: 170px">
                                                             <h4 class="fs-22 fw-bold ff-secondary text-white mb-4">
