@@ -18,161 +18,191 @@ use Carbon\Carbon;
 
 class EmployeeAttendanceController extends Controller
 {
-    public function emp_start_day(Request $request)
+   public function emp_start_day(Request $request)
     {
-        $id=Auth::guard('web_employees')->user()->empid;
-        try
-        {
+        $id = Auth::guard('web_employees')->user()->empid;
+
+        try {
             if (empty($request->start_latitude) || empty($request->start_longitude)) {
                 return redirect()->back()->with('error', 'Please enable location');
             }
-            $Attendence=Attendence::where(['empid'=>$id])->whereDate('start_date_time', Carbon::today())->get();
 
-            $Employee=Employee::select('in_time','morning_half_day_in_time','evening_half_day_in_time','grace_period')->where(['empid'=>$id])->first();
+            $alreadyStarted = Attendence::where('empId', $id)
+                ->whereDate('start_date_time', Carbon::today())
+                ->exists();
 
-
-            if(sizeof($Attendence) == 0)
-            {
-                $startDateTime = Carbon::now(); // 2025-02-22 14:08:30 
-                $morningHalfday = Carbon::parse($Employee->morning_half_day_in_time); // e.g., 12:00 PM
-                $inTime = Carbon::parse($Employee->in_time); // e.g., 9:00 AM
-                $gracePeriod = $Employee->grace_period ?? 10; // Grace period in minutes (default: 10)
-
-                // Calculate the allowed in-time with grace period
-                $allowedInTime = $inTime->copy()->addMinutes($gracePeriod);
-
-                if ($startDateTime > $morningHalfday) {
-                    // If login is after morning half-day time (e.g., 12 PM), it's a full-day leave
-                    $dayType = 3; // Full day leave
-                }
-                elseif ($startDateTime > $allowedInTime || $startDateTime > $morningHalfday) 
-                {
-                    // If login is after the grace period, it's a half-day
-                    $dayType = 2; // Half day
-                } else {
-                    // If login is within the allowed time, it's a full day
-                    $dayType = NULL; // Full day
-                }
-
-                
-
-                $Attendence=new Attendence();
-                $Attendence->empId=$id;
-                $Attendence->start_date_time=Carbon::now();
-                $Attendence->start_latitude=$request->start_latitude;
-                $Attendence->start_longitude=$request->start_longitude;
-                $Attendence->start_address=$request->start_address;
-                $Attendence->day=$dayType;
-                $Attendence->save();
-
-              return redirect()->back()->with('success', 'Day started successfully');
-
-            
-            } else 
-            {
-              return redirect()->back()->with('error', 'Day Already Started');
-
+            if ($alreadyStarted) {
+                return redirect()->back()->with('error', 'Day Already Started');
             }
-            
-            //return redirect()->route('employee.index')->with('success','Employee Created Successfully');
+
+            $employee = Employee::select(
+                    'in_time',
+                    'out_time',
+                    'grace_period',
+                    'morning_half_day_in_time',
+                    'morning_half_day_out_time'
+                )
+                ->where('empid', $id)
+                ->first();
+
+            if (!$employee) {
+                return redirect()->back()->with('error', 'Employee timing not found');
+            }
+
+            $startDateTime = Carbon::now();
+
+            /*
+                Start day time par final full day confirm nahi kari sakay,
+                karan ke out time end_day par check thase.
+                Late hoy to provisional half / absent set kari diye.
+            */
+            $dayType = $this->getStartDayType($startDateTime, $employee);
+
+            $attendance = new Attendence();
+            $attendance->empId = $id;
+            $attendance->start_date_time = $startDateTime;
+            $attendance->start_latitude = $request->start_latitude;
+            $attendance->start_longitude = $request->start_longitude;
+            $attendance->start_address = $request->start_address;
+            $attendance->day = $dayType;
+            $attendance->save();
+
+            return redirect()->back()->with('success', 'Day started successfully');
+
         } catch (\Exception $e) {
-            // return redirect()->back()->with('error', 'An error occurred while updating the employee.');
+            return redirect()->back()->with('error', 'An error occurred while starting the day.');
         }
     }
+
     public function end_day(Request $request)
     {
-       try{
+        try {
             if (empty($request->end_latitude) || empty($request->end_longitude)) {
                 return redirect()->back()->with('error', 'Please enable location');
             }
-             $id=Auth::guard('web_employees')->user()->empid;
 
-            $Attendence=Attendence::where(['empid'=>$id])->whereDate('end_date_time', Carbon::today())->get();
+            $id = Auth::guard('web_employees')->user()->empid;
 
-            if(sizeof($Attendence) == 0)
-            {
+            $alreadyClosed = Attendence::where('empId', $id)
+                ->whereDate('start_date_time', Carbon::today())
+                ->whereNotNull('end_date_time')
+                ->exists();
 
-                $attendancedata = Attendence::where(['empid' => $id])->whereDate('start_date_time', Carbon::today())->first();
-                $employee=Employee::select('grace_period','in_time','out_time','morning_half_day_in_time','morning_half_day_out_time')->where(['empid'=>$id])->first();
-                if(!empty($attendancedata))
-                {
-                    /*$endDateTime = Carbon::parse(Carbon::now());*/
-                  
-                    $startDateTime = Carbon::parse($attendancedata->start_date_time);
-                    $endDateTime = Carbon::parse( Carbon::parse(Carbon::now())); // Use Carbon::now() in real scenario
-                    $grace_period = $employee->grace_period; // in minutes
-
-                    $officialStartTime = Carbon::parse(Carbon::today()->format('Y-m-d') . $employee->in_time);
-                    $officialEndTime = Carbon::parse(Carbon::today()->format('Y-m-d') . $employee->out_time);
-
-                    $allowedStartTime = $officialStartTime->copy()->addMinutes($grace_period);
-                    $allowedEndTime = $officialEndTime->copy()->subMinutes($grace_period); // Leaving early?
-
-                    $morningHalfdayIn = Carbon::parse(Carbon::today()->format('Y-m-d') . ' ' . $employee->morning_half_day_in_time);
-                    $morningHalfdayOut = Carbon::parse(Carbon::today()->format('Y-m-d') . ' ' . $employee->morning_half_day_out_time);
-
-
-                    /*if ($startDateTime->gt($allowedStartTime)) {
-                        // Late beyond grace = half day
-                        $dayType = 2;
-                        $hoursWorked = 0;
-                    } elseif ($endDateTime->lt($allowedEndTime)) {
-                        // Left early before allowed time = half day
-                        $dayType = 2;
-                        $hoursWorked = $startDateTime->diffInHours($endDateTime);
-                    } else {
-                        // Came on time, stayed long enough
-                        $totalMinutesWorked = $startDateTime->diffInMinutes($endDateTime);
-                        $hoursWorked = $startDateTime->diffInHours($endDateTime);
-                        $dayType = ($totalMinutesWorked >= (9 * 60)) ? 1 : 2;
-                    }*/
-
-                if ($startDateTime->gt($morningHalfdayIn) || $endDateTime->lt($morningHalfdayOut)) {
-                    $dayType = 3; // Full day leave
-                    $hoursWorked = 0;
-                }
-                //  Half day if came late OR left early
-                elseif ($startDateTime->gt($allowedStartTime) || $endDateTime->lt($allowedEndTime)) {
-                    $dayType = 2; // Half day
-                    $hoursWorked = $startDateTime->diffInHours($endDateTime);
-                }
-                //  Check for 9-hour rule
-                else {
-                    $totalMinutesWorked = $startDateTime->diffInMinutes($endDateTime);
-                    $hoursWorked = $startDateTime->diffInHours($endDateTime);
-
-                    $dayType = ($totalMinutesWorked >= (9 * 60)) ? 1 : 2;
-                }
-
-
-
-                    $data = array(
-                        'end_date_time' => Carbon::parse(Carbon::now()),
-                        'end_latitude'=>$request->end_latitude,
-                        'end_longitude'=>$request->end_longitude,
-                        'end_address'=>$request->end_address,
-                        'day' =>$dayType,
-                        'working_hrs' =>$hoursWorked
-                        );
-                    Attendence::where(["empid"=>$id,"start_date_time"=>$attendancedata->start_date_time])->update($data);
-    
-                    return redirect()->back()->with('success', 'Day closed successfully');
-                }else{
-                    return redirect()->back()->with('error', 'You have to first strat your day');
- 
-                }
-        
-            }else 
-            {
-              return redirect()->back()->with('error', 'Day already closed');
-
+            if ($alreadyClosed) {
+                return redirect()->back()->with('error', 'Day already closed');
             }
+
+            $attendancedata = Attendence::where('empId', $id)
+                ->whereDate('start_date_time', Carbon::today())
+                ->whereNull('end_date_time')
+                ->first();
+
+            if (empty($attendancedata)) {
+                return redirect()->back()->with('error', 'You have to first start your day');
+            }
+
+            $employee = Employee::select(
+                    'grace_period',
+                    'in_time',
+                    'out_time',
+                    'morning_half_day_in_time',
+                    'morning_half_day_out_time'
+                )
+                ->where('empid', $id)
+                ->first();
+
+            if (!$employee) {
+                return redirect()->back()->with('error', 'Employee timing not found');
+            }
+
+            $startDateTime = Carbon::parse($attendancedata->start_date_time);
+            $endDateTime = Carbon::now();
+
+            $dayType = $this->getFinalDayType($startDateTime, $endDateTime, $employee);
+
+            $totalMinutesWorked = $startDateTime->diffInMinutes($endDateTime);
+            $hoursWorked = floor($totalMinutesWorked / 60);
+
+            Attendence::where('empId', $id)
+                ->where('attendenceId', $attendancedata->attendenceId)
+                ->update([
+                    'end_date_time' => $endDateTime,
+                    'end_latitude' => $request->end_latitude,
+                    'end_longitude' => $request->end_longitude,
+                    'end_address' => $request->end_address,
+                    'day' => $dayType,
+                    'working_hrs' => $hoursWorked,
+                ]);
+
+            return redirect()->back()->with('success', 'Day closed successfully');
+
         } catch (\Exception $e) {
-            // Log the exception or handle it in any other way you prefer
             return redirect()->back()->with('error', 'An error occurred while updating the employee.');
         }
     }
     
+    private function makeTodayTime($time)
+    {
+        return Carbon::parse(Carbon::today()->toDateString() . ' ' . $time);
+    }
+
+    private function getStartDayType(Carbon $startDateTime, $employee)
+    {
+        $gracePeriod = (int) ($employee->grace_period ?? 0);
+
+        $officialStartTime = $this->makeTodayTime($employee->in_time);
+        $allowedStartTime = $officialStartTime->copy()->addMinutes($gracePeriod);
+
+        $halfDayLastInTime = $this->makeTodayTime($employee->morning_half_day_in_time);
+
+        /*
+            day value:
+            NULL = pending, final decision end_day par thase
+            2 = Half Day
+            3 = Absent
+        */
+
+        if ($startDateTime->gt($halfDayLastInTime)) {
+            return 3; // 11:30 AM pachi start kare to absent
+        }
+
+        if ($startDateTime->gt($allowedStartTime)) {
+            return 2; // Grace pachi but half-day limit pela start kare to half day
+        }
+
+        return null; // On time start, final present end_day par check thase
+    }
+
+    private function getFinalDayType(Carbon $startDateTime, Carbon $endDateTime, $employee)
+    {
+        $gracePeriod = (int) ($employee->grace_period ?? 0);
+
+        $officialStartTime = $this->makeTodayTime($employee->in_time);
+        $officialEndTime = $this->makeTodayTime($employee->out_time);
+
+        $allowedStartTime = $officialStartTime->copy()->addMinutes($gracePeriod);
+        $allowedEndTime = $officialEndTime->copy()->subMinutes($gracePeriod);
+
+        $halfDayLastInTime = $this->makeTodayTime($employee->morning_half_day_in_time);
+        $halfDayMinimumOutTime = $this->makeTodayTime($employee->morning_half_day_out_time);
+
+        /*
+            day value:
+            1 = Present / Full Day
+            2 = Half Day
+            3 = Absent
+        */
+
+        if ($startDateTime->gt($halfDayLastInTime) || $endDateTime->lt($halfDayMinimumOutTime)) {
+            return 3; // Absent
+        }
+
+        if ($startDateTime->gt($allowedStartTime) || $endDateTime->lt($allowedEndTime)) {
+            return 2; // Half Day
+        }
+
+        return 1; // Full Day
+    }
 
      public function index(Request $request)
     {
